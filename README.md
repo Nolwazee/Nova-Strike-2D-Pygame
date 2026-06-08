@@ -176,6 +176,9 @@ Procedurally generated using NumPy.
 | SPACE      | Use Bomb          |
 | ESC        | Quit/Menu         |
 | R          | Retry (Game Over) |
+| P	       | Pause             |
+| R          | Resume            |
+| Q	       | Quit              |
 
 ---
 
