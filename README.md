@@ -13,13 +13,13 @@
 
 Humanity is on the brink of extinction.
 
-An unstoppable alien armada has invaded Earth, destroying cities and military defenses worldwide. As Earth's final fighter pilot, you are humanity's last hope.
+An unstoppable alien race know as Void Armada has invaded Earth, destroying cities, countries and military defenses worldwide. As Earth's final fighter pilot, you are humanity's last hope.
 
 Wave after wave of enemy ships descend from deep space.
 
 Your mission:
 
-**Survive. Defend Earth. Defeat the invasion.**
+**Survive. Defend Earth. Destroy the alien fleet. Defeat the invasion.**
 
 ---
 
@@ -176,6 +176,9 @@ Procedurally generated using NumPy.
 | SPACE      | Use Bomb          |
 | ESC        | Quit/Menu         |
 | R          | Retry (Game Over) |
+| P	       | Pause             |
+| R          | Resume            |
+| Q	       | Quit              |
 
 ---
 
@@ -285,7 +288,7 @@ BOSS BATTLES
 
 # 👨‍💻 Developer
 
-**Group 20**
+**Group 25**
 
 PBDE401 Game Development Project
 

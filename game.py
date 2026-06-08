@@ -10,6 +10,10 @@ import math
 import random
 import sys
 import os
+import json
+import socket
+import threading
+from datetime import datetime
 
 # ─── INIT ───────────────────────────────────────────────────────────────────
 pygame.init()
@@ -38,6 +42,65 @@ PINK   = (255, 80, 180)
 screen = pygame.display.set_mode((W, H))
 pygame.display.set_caption(TITLE)
 clock = pygame.time.Clock()
+
+# ─── SAVE SYSTEM ─────────────────────────────────────────────────────────────
+SAVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saves")
+os.makedirs(SAVE_DIR, exist_ok=True)
+
+def save_game(profile, wave, score, hp, difficulty_label):
+    """Save game state to saves/<profile>.json"""
+    data = {
+        "profile":    profile,
+        "wave":       wave,
+        "score":      score,
+        "hp":         hp,
+        "difficulty": difficulty_label,
+        "saved_at":   datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    path = os.path.join(SAVE_DIR, f"{profile}.json")
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    return path
+
+def load_game(profile):
+    """Load save data for profile. Returns dict or None."""
+    path = os.path.join(SAVE_DIR, f"{profile}.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def delete_save(profile):
+    """Delete a save file."""
+    path = os.path.join(SAVE_DIR, f"{profile}.json")
+    if os.path.exists(path):
+        os.remove(path)
+
+def list_saves():
+    """Return list of (profile_name, save_data) for all saves."""
+    saves = []
+    if not os.path.exists(SAVE_DIR):
+        return saves
+    for fname in os.listdir(SAVE_DIR):
+        if fname.endswith(".json"):
+            profile = fname[:-5]
+            data = load_game(profile)
+            if data:
+                saves.append((profile, data))
+    return sorted(saves, key=lambda x: x[1].get("saved_at", ""), reverse=True)
+
+# Active profile for this session
+_active_profile = "Player1"
+
+def get_profile():
+    return _active_profile
+
+def set_profile(name):
+    global _active_profile
+    _active_profile = name.strip() or "Player1"
 
 
 # ─── SOUND GENERATOR ─────────────────────────────────────────────────────────
@@ -270,7 +333,7 @@ def explosion(particles, x, y, color=ORANGE, count=30, speed=5):
 # ─── GAME OBJECTS ────────────────────────────────────────────────────────────
 
 class Player:
-    def __init__(self):
+    def __init__(self, color=CYAN, bullet_color=NEON_GREEN):
         self.w, self.h = 36, 36
         self.x = W // 2 - self.w // 2
         self.y = H - 100
@@ -283,7 +346,8 @@ class Player:
         self.shoot_cooldown = 0
         self.base_cooldown = 18
         self.invincible = 0
-        self.sprite = draw_player_ship()
+        self.sprite = draw_player_ship(color=color)
+        self.bullet_color = bullet_color
         self.engine_frame = 0
 
     def rect(self):
@@ -297,17 +361,16 @@ class Player:
         self.x = max(0, min(W - self.w, self.x))
         self.y = max(0, min(H - self.h, self.y))
 
-    def shoot(self, bullets):
+    def shoot(self, bullets, owner_id="player"):
         if self.shoot_cooldown <= 0:
             cd = 8 if self.rapid_timer > 0 else self.base_cooldown
-            if self.shoot_cooldown <= 0:
-                cx = self.x + self.w // 2
-                bullets.append(Bullet(cx - 2, self.y, -14, NEON_GREEN, "player"))
-                if self.rapid_timer > 0:
-                    bullets.append(Bullet(cx - 10, self.y + 6, -13, NEON_GREEN, "player"))
-                    bullets.append(Bullet(cx + 6,  self.y + 6, -13, NEON_GREEN, "player"))
-                self.shoot_cooldown = cd
-                play("shoot")
+            cx = self.x + self.w // 2
+            bullets.append(Bullet(cx - 2, self.y, -14, self.bullet_color, owner_id))
+            if self.rapid_timer > 0:
+                bullets.append(Bullet(cx - 10, self.y + 6, -13, self.bullet_color, owner_id))
+                bullets.append(Bullet(cx + 6,  self.y + 6, -13, self.bullet_color, owner_id))
+            self.shoot_cooldown = cd
+            play("shoot")
 
     def update(self):
         if self.shoot_cooldown > 0: self.shoot_cooldown -= 1
@@ -525,11 +588,12 @@ class PowerUp:
 
 # ─── WAVE DEFINITIONS ────────────────────────────────────────────────────────
 
-def build_wave(wave_num):
+def build_wave(wave_num, speed_mult=1.0):
     enemies = []
     if wave_num % 5 == 0:  # Boss wave
         e = Enemy("boss", W // 2 - 32, -80, wave_num)
         e.entry_y = 40
+        e.speed *= speed_mult
         enemies.append(e)
     else:
         count_basic = 4 + wave_num * 2
@@ -550,8 +614,18 @@ def build_wave(wave_num):
             y = -60 - row * 70
             e = Enemy(etype, x, y, wave_num)
             e.entry_y = 60 + row * 70
+            e.speed *= speed_mult
             enemies.append(e)
     return enemies
+
+
+# ─── WAVE RULES ──────────────────────────────────────────────────────────────
+
+def get_required_kills(wave, wave_total):
+    """Minimum player kills needed before a wave can be cleared."""
+    if wave % 5 == 0:
+        return 1  # boss must be defeated
+    return max(1, math.ceil(wave_total * 0.7))
 
 
 # ─── HUD DRAWING ─────────────────────────────────────────────────────────────
@@ -562,7 +636,8 @@ font_small = pygame.font.SysFont("consolas", 18)
 font_tiny  = pygame.font.SysFont("consolas", 14)
 
 
-def draw_hud(surf, player, wave, enemies_left, bomb_available):
+def draw_hud(surf, player, wave, enemies_left, bomb_available,
+             wave_total=0, kills_this_wave=0, required_kills=0, diff_label=""):
     # HP bar
     bar_w = 200
     ratio = player.hp / player.max_hp
@@ -577,13 +652,24 @@ def draw_hud(surf, player, wave, enemies_left, bomb_available):
     score_txt = font_med.render(f"SCORE  {player.score:07d}", True, CYAN)
     surf.blit(score_txt, (W // 2 - score_txt.get_width() // 2, 8))
 
-    # Wave
-    wave_txt = font_small.render(f"WAVE {wave}", True, YELLOW)
+    # Wave label — red on boss waves
+    is_boss_wave = (wave % 5 == 0)
+    wave_label = f"BOSS  WAVE  {wave}" if is_boss_wave else f"WAVE  {wave}"
+    wave_txt = font_small.render(wave_label, True, RED if is_boss_wave else YELLOW)
     surf.blit(wave_txt, (W - wave_txt.get_width() - 10, 8))
 
-    # Enemies
-    en_txt = font_tiny.render(f"ENEMIES: {enemies_left}", True, GREY)
-    surf.blit(en_txt, (W - en_txt.get_width() - 10, 28))
+    if is_boss_wave:
+        # Boss wave: just remind the player what to do
+        boss_txt = font_tiny.render("DEFEAT  THE  BOSS", True, RED)
+        surf.blit(boss_txt, (W - boss_txt.get_width() - 10, 28))
+    else:
+        # Normal wave: kills progress (turns green when threshold met) + enemies remaining
+        kills_color = NEON_GREEN if kills_this_wave >= required_kills else GREY
+        kills_txt = font_tiny.render(f"KILLS: {kills_this_wave}/{required_kills}", True, kills_color)
+        surf.blit(kills_txt, (W - kills_txt.get_width() - 10, 28))
+        en_label = f"LEFT: {enemies_left}/{wave_total}" if wave_total else f"LEFT: {enemies_left}"
+        en_txt = font_tiny.render(en_label, True, GREY)
+        surf.blit(en_txt, (W - en_txt.get_width() - 10, 44))
 
     # Power-up timers
     y = 36
@@ -598,6 +684,11 @@ def draw_hud(surf, player, wave, enemies_left, bomb_available):
     bomb_col = ORANGE if bomb_available else GREY
     bomb_txt = font_tiny.render("[ SPACE ] BOMB" if bomb_available else "NO BOMB", True, bomb_col)
     surf.blit(bomb_txt, (10, H - 22))
+
+    # Difficulty label (bottom-right)
+    if diff_label:
+        diff_txt = font_tiny.render(f"DIFFICULTY: {diff_label}", True, GREY)
+        surf.blit(diff_txt, (W - diff_txt.get_width() - 10, H - 22))
 
 
 def draw_stars(surf, stars):
@@ -616,6 +707,229 @@ def scroll_stars(stars):
         if s[1] > H:
             s[1] = 0
             s[0] = random.randint(0, W)
+
+
+# ─── MULTIPLAYER NETWORK MANAGER ─────────────────────────────────────────────
+
+MP_PORT = 55555
+MP_BUFFER = 2048
+
+class NetworkManager:
+    """Handles socket communication for LAN/internet co-op."""
+    def __init__(self):
+        self.sock = None
+        self.conn = None          # host: accepted connection
+        self.connected = False
+        self.is_host = False
+        self.recv_data = {}       # latest received state
+        self.send_lock = threading.Lock()
+        self._recv_thread = None
+
+    def host(self, port=MP_PORT):
+        self.is_host = True
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(("", port))
+        self.sock.listen(1)
+        self.sock.settimeout(60)
+        try:
+            self.conn, addr = self.sock.accept()
+            self.conn.settimeout(2)
+            try:
+                self.conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except Exception:
+                pass
+            self.connected = True
+            self._start_recv(self.conn)
+            return addr[0]
+        except Exception:
+            return None
+
+    def join(self, host_ip, port=MP_PORT):
+        self.is_host = False
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.settimeout(8)
+        try:
+            self.sock.connect((host_ip, port))
+            self.sock.settimeout(2)
+            try:
+                self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except Exception:
+                pass
+            self.connected = True
+            self._start_recv(self.sock)
+            return True
+        except Exception:
+            return False
+
+    def _start_recv(self, sock):
+        def recv_loop():
+            buf = ""
+            while self.connected:
+                try:
+                    chunk = sock.recv(MP_BUFFER).decode("utf-8", errors="ignore")
+                    if not chunk:
+                        break
+                    buf += chunk
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        try:
+                            self.recv_data = json.loads(line)
+                        except Exception:
+                            pass
+                except Exception:
+                    break
+            self.connected = False
+        self._recv_thread = threading.Thread(target=recv_loop, daemon=True)
+        self._recv_thread.start()
+
+    def send(self, data):
+        if not self.connected:
+            return
+        sock = self.conn if self.is_host else self.sock
+        try:
+            with self.send_lock:
+                sock.sendall((json.dumps(data) + "\n").encode("utf-8"))
+        except Exception:
+            self.connected = False
+
+    def close(self):
+        self.connected = False
+        try:
+            if self.conn: self.conn.close()
+            if self.sock: self.sock.close()
+        except Exception:
+            pass
+
+    @staticmethod
+    def get_local_ip():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
+
+
+# ─── HELPERS ─────────────────────────────────────────────────────────────────
+
+def text_input_box(prompt, default="", max_len=20):
+    """Full-screen text input. Returns typed string or default on ESC."""
+    stars = draw_star_field(180)
+    text = default
+    tick = 0
+    pygame.key.start_text_input()
+    try:
+        while True:
+            for ev in pygame.event.get():
+                if ev.type == pygame.QUIT: pygame.quit(); sys.exit()
+                elif ev.type == pygame.TEXTINPUT:
+                    if len(text) < max_len:
+                        text += ev.text
+                elif ev.type == pygame.KEYDOWN:
+                    if ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                        return text.strip() or "Player1"
+                    elif ev.key == pygame.K_ESCAPE:
+                        return default or "Player1"
+                    elif ev.key == pygame.K_BACKSPACE:
+                        text = text[:-1]
+                    elif ev.unicode and len(text) < max_len and ev.unicode.isprintable() and ev.key not in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE, pygame.K_BACKSPACE):
+                        text += ev.unicode
+            
+            screen.fill(DARK_BLUE)
+            scroll_stars(stars)
+            draw_stars(screen, stars)
+            p = font_small.render(prompt, True, CYAN)
+            screen.blit(p, (W//2 - p.get_width()//2, H//2 - 60))
+            # Input box
+            box = pygame.Rect(W//2 - 160, H//2 - 20, 320, 44)
+            pygame.draw.rect(screen, (20, 20, 50), box, border_radius=6)
+            pygame.draw.rect(screen, CYAN, box, 2, border_radius=6)
+            cursor = "|" if tick % 60 < 30 else ""
+            txt = font_med.render(text + cursor, True, WHITE)
+            screen.blit(txt, (box.x + 12, box.y + 8))
+            hint = font_tiny.render("ENTER to confirm   ESC to cancel", True, GREY)
+            screen.blit(hint, (W//2 - hint.get_width()//2, H//2 + 40))
+            pygame.display.flip()
+            clock.tick(FPS)
+            tick += 1
+    finally:
+        pygame.key.stop_text_input()
+
+
+def profile_screen():
+    """Profile selection / creation screen. Returns chosen profile name."""
+    saves = list_saves()
+    stars = draw_star_field(180)
+    tick = 0
+    selected = 0  # 0 = "New Profile", 1+ = existing saves
+
+    options = ["[ NEW PROFILE ]"] + [f"{s[0]}  —  Wave {s[1]['wave']}  ({s[1]['saved_at']})" for s in saves]
+
+    while True:
+        mouse_pos = pygame.mouse.get_pos()
+        
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT: pygame.quit(); sys.exit()
+            if ev.type == pygame.KEYDOWN:
+                if ev.key in (pygame.K_UP, pygame.K_w):
+                    selected = (selected - 1) % len(options)
+                elif ev.key in (pygame.K_DOWN, pygame.K_s):
+                    selected = (selected + 1) % len(options)
+                elif ev.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                    if selected == 0:
+                        name = text_input_box("Enter your pilot name:", default="")
+                        set_profile(name)
+                    else:
+                        set_profile(saves[selected - 1][0])
+                    return get_profile()
+                elif ev.key == pygame.K_ESCAPE:
+                    return get_profile()
+            elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                for i in range(len(options)):
+                    y = 110 + i * 44
+                    rect = pygame.Rect(40, y - 4, W - 80, 36)
+                    if rect.collidepoint(ev.pos):
+                        if i == 0:
+                            name = text_input_box("Enter your pilot name:", default="")
+                            set_profile(name)
+                        else:
+                            set_profile(saves[i - 1][0])
+                        return get_profile()
+
+        # Update hovered selection using mouse position
+        for i in range(len(options)):
+            y = 110 + i * 44
+            rect = pygame.Rect(40, y - 4, W - 80, 36)
+            if rect.collidepoint(mouse_pos):
+                selected = i
+
+        screen.fill(DARK_BLUE)
+        scroll_stars(stars)
+        draw_stars(screen, stars)
+
+        hdr = font_med.render("SELECT  PROFILE", True, CYAN)
+        screen.blit(hdr, (W//2 - hdr.get_width()//2, 50))
+        pygame.draw.line(screen, CYAN, (60, 88), (W-60, 88), 1)
+
+        for i, opt in enumerate(options):
+            y = 110 + i * 44
+            is_sel = (i == selected)
+            col = YELLOW if is_sel else GREY
+            if i == 0: col = NEON_GREEN if is_sel else GREEN
+            if is_sel:
+                pygame.draw.rect(screen, (20, 20, 50), (40, y - 4, W - 80, 36), border_radius=4)
+                pygame.draw.rect(screen, col, (40, y - 4, W - 80, 36), 1, border_radius=4)
+            t = font_small.render(opt, True, col)
+            screen.blit(t, (60, y))
+
+        hint = font_tiny.render("↑ / ↓  Navigate   ENTER / CLICK  Select   ESC  Back", True, GREY)
+        screen.blit(hint, (W//2 - hint.get_width()//2, H - 28))
+        pygame.display.flip()
+        clock.tick(FPS)
+        tick += 1
 
 
 # ─── SCREENS ─────────────────────────────────────────────────────────────────
@@ -881,20 +1195,67 @@ def tutorial_stage():
 
 
 def title_screen():
+    """Main menu. Returns one of: 'new', 'continue', 'multiplayer', 'quit'."""
     stars = draw_star_field(200)
-    ship_y = H + 50
-    target_y = H // 2 + 20
+    ship_y = float(H + 50)
+    target_y = H // 2 - 60
     ship_sprite = draw_player_ship(size=60)
     tick = 0
+    selected = 0
 
     while True:
+        save_data = load_game(get_profile())
+        has_save = save_data is not None
+
+        menu_items = []
+        if has_save:
+            menu_items.append(("CONTINUE",    NEON_GREEN,  "continue"))
+        menu_items.append(    ("NEW GAME",     YELLOW,      "new"))
+        menu_items.append(    ("MULTIPLAYER",  CYAN,        "multiplayer"))
+        menu_items.append(    ("PROFILE",      PURPLE,      "profile"))
+        menu_items.append(    ("QUIT",         RED,         "quit"))
+
+        selected = max(0, min(selected, len(menu_items) - 1))
+        start_y = H // 2 + 10
+        mouse_pos = pygame.mouse.get_pos()
+
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT: pygame.quit(); sys.exit()
             if ev.type == pygame.KEYDOWN:
-                if ev.key in (pygame.K_RETURN, pygame.K_SPACE):
-                    return
-                if ev.key == pygame.K_ESCAPE:
-                    pygame.quit(); sys.exit()
+                if ev.key in (pygame.K_UP, pygame.K_w):
+                    selected = (selected - 1) % len(menu_items)
+                elif ev.key in (pygame.K_DOWN, pygame.K_s):
+                    selected = (selected + 1) % len(menu_items)
+                elif ev.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                    action = menu_items[selected][2]
+                    if action == "profile":
+                        profile_screen()
+                    else:
+                        return action
+                elif ev.key == pygame.K_c and has_save:
+                    return "continue"
+                elif ev.key == pygame.K_n:
+                    return "new"
+                elif ev.key == pygame.K_m:
+                    return "multiplayer"
+                elif ev.key == pygame.K_p:
+                    profile_screen()
+                elif ev.key in (pygame.K_ESCAPE, pygame.K_q):
+                    return "quit"
+            elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                for i, (label, col, action) in enumerate(menu_items):
+                    rect = pygame.Rect(W // 2 - 180, start_y + i * 44 - 4, 360, 36)
+                    if rect.collidepoint(ev.pos):
+                        if action == "profile":
+                            profile_screen()
+                        else:
+                            return action
+
+        # Update hovered selection using mouse position
+        for i, (label, col, action) in enumerate(menu_items):
+            rect = pygame.Rect(W // 2 - 180, start_y + i * 44 - 4, 360, 36)
+            if rect.collidepoint(mouse_pos):
+                selected = i
 
         screen.fill(DARK_BLUE)
         scroll_stars(stars)
@@ -917,20 +1278,29 @@ def title_screen():
         sub = font_small.render("Earth's last fighter. The stars await.", True, GREY)
         screen.blit(sub, (W // 2 - sub.get_width() // 2, 148))
 
+        prof_lbl = font_small.render(f"Pilot Profile: {get_profile()}", True, YELLOW)
+        screen.blit(prof_lbl, (W // 2 - prof_lbl.get_width() // 2, 180))
+
         screen.blit(ship_sprite, (W // 2 - 30, int(ship_y)))
 
-        if tick % 80 < 55:
-            start = font_med.render("PRESS  ENTER  TO  START", True, YELLOW)
-            screen.blit(start, (W // 2 - start.get_width() // 2, H - 120))
+        # Draw interactive menu items
+        for i, (label, col, action) in enumerate(menu_items):
+            is_sel = (i == selected)
+            prefix = "▶ " if is_sel else "  "
+            text_color = WHITE if is_sel and (tick % 30 < 15) else (WHITE if is_sel else col)
+            if action == "continue" and has_save:
+                lbl = font_med.render(f"{prefix}{label} (Wave {save_data['wave']})", True, text_color)
+            else:
+                lbl = font_med.render(f"{prefix}{label}", True, text_color)
+            screen.blit(lbl, (W // 2 - lbl.get_width() // 2, start_y + i * 44))
 
         controls = [
-            "WASD / ARROW KEYS : MOVE",
-            "Z / CTRL : SHOOT",
-            "SPACE : BOMB (collect first!)",
+            "WASD / ARROW KEYS : MOVE     Z / CTRL : SHOOT",
+            "SPACE : BOMB (collect first!)     ESC / P : PAUSE",
         ]
         for i, line in enumerate(controls):
             t = font_tiny.render(line, True, GREY)
-            screen.blit(t, (W // 2 - t.get_width() // 2, H - 72 + i * 17))
+            screen.blit(t, (W // 2 - t.get_width() // 2, H - 54 + i * 17))
 
         pygame.display.flip()
         clock.tick(FPS)
@@ -988,63 +1358,159 @@ def wave_banner(wave_num):
             if ev.type == pygame.QUIT: pygame.quit(); sys.exit()
 
 
-def pause_screen(surf):
-    """Render a semi-transparent pause menu overlay and handle menu navigation."""
-    # Capture the current screen to show it under the menu
+def pause_screen(surf, wave=1, score=0, hp=100, diff_label="MEDIUM"):
+    """Semi-transparent pause overlay. Returns 'resume','restart','save_quit', or 'menu'."""
     overlay = surf.copy()
-    
-    # Semi-transparent dark cover
     darken = pygame.Surface((W, H), pygame.SRCALPHA)
-    darken.fill((10, 10, 30, 180)) # Dark blue-ish semi-transparent overlay
+    darken.fill((10, 10, 30, 180))
     overlay.blit(darken, (0, 0))
-    
-    # Pause title
-    title = font_big.render("GAME  PAUSED", True, CYAN)
+
+    title  = font_big.render("GAME  PAUSED", True, CYAN)
     shadow = font_big.render("GAME  PAUSED", True, PURPLE)
-    
-    # Menu options
+
     options = [
-        "[ R ] RESUME GAME",
-        "[ Q ] QUIT TO MENU"
+        ("[ R ]  RESUME GAME",     YELLOW),
+        ("[ S ]  SAVE & QUIT",     NEON_GREEN),
+        ("[ N ]  NEW GAME",        ORANGE),
+        ("[ Q ]  RETURN TO MENU",  RED),
     ]
-    
-    # Keep the music state or pause all sounds
+
     pygame.mixer.pause()
-    
     tick = 0
     while True:
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                pygame.quit(); sys.exit()
             if ev.type == pygame.KEYDOWN:
                 if ev.key in (pygame.K_r, pygame.K_ESCAPE):
                     pygame.mixer.unpause()
                     return "resume"
+                if ev.key == pygame.K_s:
+                    save_game(get_profile(), wave, score, hp, diff_label)
+                    pygame.mixer.unpause()
+                    return "save_quit"
+                if ev.key == pygame.K_n:
+                    pygame.mixer.unpause()
+                    return "restart"
                 if ev.key == pygame.K_q:
-                    return "quit"
+                    pygame.mixer.unpause()
+                    return "menu"
 
-        # Draw background capture
         surf.blit(overlay, (0, 0))
-        
-        # Draw title with shadow effect
         tx = W // 2 - title.get_width() // 2
-        surf.blit(shadow, (tx + 3, H // 2 - 80 + 3))
-        surf.blit(title, (tx, H // 2 - 80))
-        
-        # Draw options with blinking selection instructions
-        for i, opt in enumerate(options):
-            col = YELLOW if i == 0 else RED
-            # Blinking effect for Resume option to look active
-            if i == 0 and tick % 60 < 30:
-                col = WHITE
-            t = font_med.render(opt, True, col)
-            surf.blit(t, (W // 2 - t.get_width() // 2, H // 2 + 10 + i * 45))
-            
-        # Draw subtext instructions
-        sub = font_tiny.render("Press ESC / R to Resume or Q to Quit", True, GREY)
-        surf.blit(sub, (W // 2 - sub.get_width() // 2, H - 50))
-        
+        surf.blit(shadow, (tx + 3, H // 2 - 100 + 3))
+        surf.blit(title,  (tx,     H // 2 - 100))
+
+        for i, (label, col) in enumerate(options):
+            if i == 0 and tick % 60 < 30: col = WHITE
+            t = font_med.render(label, True, col)
+            surf.blit(t, (W // 2 - t.get_width() // 2, H // 2 - 20 + i * 48))
+
+        # Profile + save info
+        prof = font_tiny.render(f"Profile: {get_profile()}   Wave: {wave}   Score: {score:07d}", True, GREY)
+        surf.blit(prof, (W // 2 - prof.get_width() // 2, H - 50))
+        sub = font_tiny.render("R/ESC: Resume   S: Save & Quit   N: New Game   Q: Menu", True, GREY)
+        surf.blit(sub, (W // 2 - sub.get_width() // 2, H - 28))
+
+        pygame.display.flip()
+        clock.tick(FPS)
+        tick += 1
+
+
+def difficulty_selection_screen():
+    """Let the player choose difficulty. Returns a difficulty dict, or None (ESC = back)."""
+    stars = draw_star_field(200)
+    tick = 0
+    selected_index = 1  # default to MEDIUM
+
+    DIFFICULTIES = [
+        {
+            "label": "EASY",
+            "target_waves": 5,
+            "speed_mult": 0.85,
+            "powerup_mult": 1.25,
+            "desc": ["5 Waves", "Slower enemies", "More power-ups"],
+            "color": NEON_GREEN,
+            "key": pygame.K_1,
+        },
+        {
+            "label": "MEDIUM",
+            "target_waves": 10,
+            "speed_mult": 1.0,
+            "powerup_mult": 1.0,
+            "desc": ["10 Waves", "Standard gameplay", ""],
+            "color": YELLOW,
+            "key": pygame.K_2,
+        },
+        {
+            "label": "HARD",
+            "target_waves": 15,
+            "speed_mult": 1.2,
+            "powerup_mult": 0.75,
+            "desc": ["15 Waves", "Faster enemies", "Fewer power-ups"],
+            "color": RED,
+            "key": pygame.K_3,
+        },
+    ]
+
+    while True:
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if ev.type == pygame.KEYDOWN:
+                if ev.key == pygame.K_ESCAPE:
+                    return None
+                if ev.key in (pygame.K_LEFT, pygame.K_a):
+                    selected_index = (selected_index - 1) % len(DIFFICULTIES)
+                elif ev.key in (pygame.K_RIGHT, pygame.K_d):
+                    selected_index = (selected_index + 1) % len(DIFFICULTIES)
+                elif ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                    return DIFFICULTIES[selected_index]
+                else:
+                    for i, d in enumerate(DIFFICULTIES):
+                        if ev.key == d["key"]:
+                            return d
+
+        screen.fill(DARK_BLUE)
+        scroll_stars(stars)
+        draw_stars(screen, stars)
+
+        hdr = font_med.render("SELECT  DIFFICULTY", True, CYAN)
+        shd = font_med.render("SELECT  DIFFICULTY", True, PURPLE)
+        tx = W // 2 - hdr.get_width() // 2
+        screen.blit(shd, (tx + 2, 62))
+        screen.blit(hdr, (tx, 60))
+        pygame.draw.line(screen, GREY, (80, 100), (W - 80, 100), 1)
+
+        card_w = 190
+        card_h = 160
+        gap = 20
+        total_w = card_w * 3 + gap * 2
+        start_x = W // 2 - total_w // 2
+
+        for i, d in enumerate(DIFFICULTIES):
+            cx = start_x + i * (card_w + gap)
+            cy = H // 2 - card_h // 2 - 40
+            rect = pygame.Rect(cx, cy, card_w, card_h)
+            is_sel = (i == selected_index)
+            bg_col = (15, 20, 50) if is_sel else (5, 5, 25)
+            brd_col = d["color"] if is_sel else GREY
+            pygame.draw.rect(screen, bg_col, rect, border_radius=8)
+            pygame.draw.rect(screen, brd_col, rect, 2 if is_sel else 1, border_radius=8)
+
+            # Draw label
+            lbl = font_med.render(d["label"], True, d["color"])
+            screen.blit(lbl, (cx + card_w // 2 - lbl.get_width() // 2, cy + 16))
+
+            # Draw desc lines
+            for j, line in enumerate(d["desc"]):
+                t = font_tiny.render(line, True, WHITE)
+                screen.blit(t, (cx + card_w // 2 - t.get_width() // 2, cy + 54 + j * 22))
+
+        # Instructions
+        inst = font_small.render("← / →  Navigate     ENTER  Confirm     ESC  Cancel", True, GREY)
+        screen.blit(inst, (W // 2 - inst.get_width() // 2, H - 120))
+
         pygame.display.flip()
         clock.tick(FPS)
         tick += 1
@@ -1052,15 +1518,43 @@ def pause_screen(surf):
 
 # ─── MAIN GAME LOOP ──────────────────────────────────────────────────────────
 
-def run_game():
+def run_game(difficulty=None, continue_data=None):
+    if difficulty is None:
+        difficulty = {"label": "MEDIUM", "target_waves": 10, "speed_mult": 1.0, "powerup_mult": 1.0}
+    target_waves = difficulty["target_waves"]
+    speed_mult   = difficulty["speed_mult"]
+    powerup_mult = difficulty["powerup_mult"]
+    diff_label   = difficulty["label"]
+
     player = Player()
+    # Restore from save if continuing
+    wave = 1
+    if continue_data:
+        wave = continue_data.get("wave", 1)
+        player.score = continue_data.get("score", 0)
+        player.hp    = continue_data.get("hp", 100)
+        # Map saved difficulty label back to difficulty dict
+        saved_label  = continue_data.get("difficulty", "MEDIUM")
+        label_to_diff = {
+            "EASY":   {"label": "EASY",   "target_waves": 5,  "speed_mult": 0.85, "powerup_mult": 1.25},
+            "MEDIUM": {"label": "MEDIUM", "target_waves": 10, "speed_mult": 1.0,  "powerup_mult": 1.0},
+            "HARD":   {"label": "HARD",   "target_waves": 15, "speed_mult": 1.2,  "powerup_mult": 0.75},
+        }
+        difficulty   = label_to_diff.get(saved_label, difficulty)
+        target_waves = difficulty["target_waves"]
+        speed_mult   = difficulty["speed_mult"]
+        powerup_mult = difficulty["powerup_mult"]
+        diff_label   = difficulty["label"]
     bullets = []
     enemies = []
     powerups = []
     particles = []
     stars = draw_star_field(200)
 
-    wave = 1
+    # Note: wave was already initialized above (possibly loaded from continue_data)
+    wave_total = 0
+    kills_this_wave = 0
+    required_kills = 0
     bomb_available = False
     wave_clear_timer = 0
     showing_wave = False
@@ -1072,7 +1566,10 @@ def run_game():
         music.play(loops=-1)
 
     wave_banner(wave)
-    enemies = build_wave(wave)
+    enemies = build_wave(wave, speed_mult)
+    wave_total = len(enemies)
+    required_kills = get_required_kills(wave, wave_total)
+    kills_this_wave = 0
 
     def bomb_blast():
         nonlocal bomb_available
@@ -1092,6 +1589,7 @@ def run_game():
             ))
 
     running = True
+    exit_reason = "quit"
     while running:
         dt = clock.tick(FPS)
 
@@ -1101,9 +1599,14 @@ def run_game():
                 pygame.quit(); sys.exit()
             if ev.type == pygame.KEYDOWN:
                 if ev.key in (pygame.K_ESCAPE, pygame.K_p):
-                    action = pause_screen(screen)
-                    if action == "quit":
+                    action = pause_screen(screen, wave=wave, score=player.score,
+                                         hp=player.hp, diff_label=diff_label)
+                    if action in ("menu", "save_quit"):
                         running = False
+                        exit_reason = "menu"
+                    elif action == "restart":
+                        running = False
+                        exit_reason = "retry"
                 if ev.key in (pygame.K_SPACE,):
                     bomb_blast()
                 if ev.key in (pygame.K_z, pygame.K_LCTRL, pygame.K_RCTRL):
@@ -1163,10 +1666,11 @@ def run_game():
                         player.score += e.score_val
                         score_flash.append([f"+{e.score_val}", int(e.x + e.w // 2), int(e.y), 50])
                         # Drop power-up
-                        if random.random() < 0.25 or e.etype in ("tank", "boss"):
+                        if random.random() < 0.25 * powerup_mult or e.etype in ("tank", "boss"):
                             powerups.append(PowerUp(e.x + e.w // 2 - 11, e.y))
                         if e in enemies:
                             enemies.remove(e)
+                        kills_this_wave += 1
                         break
 
             # Enemy body vs player
@@ -1211,13 +1715,30 @@ def run_game():
 
         # ── Wave progression ──
         if not enemies and not showing_wave:
-            wave_clear_timer += 1
-            if wave_clear_timer >= FPS * 2:
-                wave += 1
-                wave_clear_timer = 0
-                play("level_up")
-                wave_banner(wave)
-                enemies = build_wave(wave)
+            if kills_this_wave < required_kills:
+                # Enemies escaped without enough kills — spawn reinforcements
+                deficit = required_kills - kills_this_wave
+                for _ in range(deficit):
+                    x = random.randint(60, W - 60)
+                    reinf = Enemy("basic", x, -60, wave)
+                    reinf.entry_y = 100
+                    reinf.speed *= speed_mult
+                    enemies.append(reinf)
+            else:
+                wave_clear_timer += 1
+                if wave_clear_timer >= FPS * 2:
+                    if wave == target_waves:  # final boss cleared — mission complete
+                        if music: music.stop()
+                        result = mission_complete_screen(player.score)
+                        return result
+                    wave += 1
+                    wave_clear_timer = 0
+                    play("level_up")
+                    wave_banner(wave)
+                    enemies = build_wave(wave, speed_mult)
+                    wave_total = len(enemies)
+                    required_kills = get_required_kills(wave, wave_total)
+                    kills_this_wave = 0
         else:
             wave_clear_timer = 0
 
@@ -1265,12 +1786,12 @@ def run_game():
             tmp.set_alpha(alpha)
             screen.blit(tmp, (sf[1] - t.get_width() // 2, int(sf[2])))
 
-        draw_hud(screen, player, wave, len(enemies), bomb_available)
+        draw_hud(screen, player, wave, len(enemies), bomb_available, wave_total, kills_this_wave, required_kills, diff_label)
         pygame.display.flip()
 
     if music:
         music.stop()
-    return "quit"
+    return exit_reason
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
