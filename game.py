@@ -686,6 +686,68 @@ def wave_banner(wave_num):
             if ev.type == pygame.QUIT: pygame.quit(); sys.exit()
 
 
+def pause_screen(surf):
+    """Render a semi-transparent pause menu overlay and handle menu navigation."""
+    # Capture the current screen to show it under the menu
+    overlay = surf.copy()
+    
+    # Semi-transparent dark cover
+    darken = pygame.Surface((W, H), pygame.SRCALPHA)
+    darken.fill((10, 10, 30, 180)) # Dark blue-ish semi-transparent overlay
+    overlay.blit(darken, (0, 0))
+    
+    # Pause title
+    title = font_big.render("GAME  PAUSED", True, CYAN)
+    shadow = font_big.render("GAME  PAUSED", True, PURPLE)
+    
+    # Menu options
+    options = [
+        "[ R ] RESUME GAME",
+        "[ Q ] QUIT TO MENU"
+    ]
+    
+    # Keep the music state or pause all sounds
+    pygame.mixer.pause()
+    
+    tick = 0
+    while True:
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if ev.type == pygame.KEYDOWN:
+                if ev.key in (pygame.K_r, pygame.K_ESCAPE):
+                    pygame.mixer.unpause()
+                    return "resume"
+                if ev.key == pygame.K_q:
+                    return "quit"
+
+        # Draw background capture
+        surf.blit(overlay, (0, 0))
+        
+        # Draw title with shadow effect
+        tx = W // 2 - title.get_width() // 2
+        surf.blit(shadow, (tx + 3, H // 2 - 80 + 3))
+        surf.blit(title, (tx, H // 2 - 80))
+        
+        # Draw options with blinking selection instructions
+        for i, opt in enumerate(options):
+            col = YELLOW if i == 0 else RED
+            # Blinking effect for Resume option to look active
+            if i == 0 and tick % 60 < 30:
+                col = WHITE
+            t = font_med.render(opt, True, col)
+            surf.blit(t, (W // 2 - t.get_width() // 2, H // 2 + 10 + i * 45))
+            
+        # Draw subtext instructions
+        sub = font_tiny.render("Press ESC / R to Resume or Q to Quit", True, GREY)
+        surf.blit(sub, (W // 2 - sub.get_width() // 2, H - 50))
+        
+        pygame.display.flip()
+        clock.tick(FPS)
+        tick += 1
+
+
 # ─── MAIN GAME LOOP ──────────────────────────────────────────────────────────
 
 def run_game():
@@ -736,8 +798,10 @@ def run_game():
             if ev.type == pygame.QUIT:
                 pygame.quit(); sys.exit()
             if ev.type == pygame.KEYDOWN:
-                if ev.key == pygame.K_ESCAPE:
-                    running = False
+                if ev.key in (pygame.K_ESCAPE, pygame.K_p):
+                    action = pause_screen(screen)
+                    if action == "quit":
+                        running = False
                 if ev.key in (pygame.K_SPACE,):
                     bomb_blast()
                 if ev.key in (pygame.K_z, pygame.K_LCTRL, pygame.K_RCTRL):
@@ -898,6 +962,8 @@ def run_game():
         draw_hud(screen, player, wave, len(enemies), bomb_available)
         pygame.display.flip()
 
+    if music:
+        music.stop()
     return "quit"
 
 
