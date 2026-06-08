@@ -19,7 +19,7 @@ Wave after wave of enemy ships descend from deep space.
 
 Your mission:
 
-**Survive. Defend Earth.Destroy the alien fleet. Defeat the invasion.**
+**Survive. Defend Earth. Destroy the alien fleet. Defeat the invasion.**
 
 ---
 
@@ -285,7 +285,7 @@ BOSS BATTLES
 
 # 👨‍💻 Developer
 
-**Group 20**
+**Group 25**
 
 PBDE401 Game Development Project
 
