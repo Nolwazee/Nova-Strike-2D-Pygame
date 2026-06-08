@@ -109,4 +109,4 @@ Arcade Space Shooter (2D, top-down)
 
 ---
 
-*NOVA STRIKE — Built for DAST401 game development requirement*
+*NOVA STRIKE — Built for PBDE401 game development requirement*
