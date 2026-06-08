@@ -483,11 +483,12 @@ class PowerUp:
 
 # ─── WAVE DEFINITIONS ────────────────────────────────────────────────────────
 
-def build_wave(wave_num):
+def build_wave(wave_num, speed_mult=1.0):
     enemies = []
     if wave_num % 5 == 0:  # Boss wave
         e = Enemy("boss", W // 2 - 32, -80, wave_num)
         e.entry_y = 40
+        e.speed *= speed_mult
         enemies.append(e)
     else:
         count_basic = 4 + wave_num * 2
@@ -508,8 +509,18 @@ def build_wave(wave_num):
             y = -60 - row * 70
             e = Enemy(etype, x, y, wave_num)
             e.entry_y = 60 + row * 70
+            e.speed *= speed_mult
             enemies.append(e)
     return enemies
+
+
+# ─── WAVE RULES ──────────────────────────────────────────────────────────────
+
+def get_required_kills(wave, wave_total):
+    """Minimum player kills needed before a wave can be cleared."""
+    if wave % 5 == 0:
+        return 1  # boss must be defeated
+    return max(1, math.ceil(wave_total * 0.7))
 
 
 # ─── HUD DRAWING ─────────────────────────────────────────────────────────────
@@ -520,7 +531,8 @@ font_small = pygame.font.SysFont("consolas", 18)
 font_tiny  = pygame.font.SysFont("consolas", 14)
 
 
-def draw_hud(surf, player, wave, enemies_left, bomb_available):
+def draw_hud(surf, player, wave, enemies_left, bomb_available,
+             wave_total=0, kills_this_wave=0, required_kills=0, diff_label=""):
     # HP bar
     bar_w = 200
     ratio = player.hp / player.max_hp
@@ -535,13 +547,24 @@ def draw_hud(surf, player, wave, enemies_left, bomb_available):
     score_txt = font_med.render(f"SCORE  {player.score:07d}", True, CYAN)
     surf.blit(score_txt, (W // 2 - score_txt.get_width() // 2, 8))
 
-    # Wave
-    wave_txt = font_small.render(f"WAVE {wave}", True, YELLOW)
+    # Wave label — red on boss waves
+    is_boss_wave = (wave % 5 == 0)
+    wave_label = f"BOSS  WAVE  {wave}" if is_boss_wave else f"WAVE  {wave}"
+    wave_txt = font_small.render(wave_label, True, RED if is_boss_wave else YELLOW)
     surf.blit(wave_txt, (W - wave_txt.get_width() - 10, 8))
 
-    # Enemies
-    en_txt = font_tiny.render(f"ENEMIES: {enemies_left}", True, GREY)
-    surf.blit(en_txt, (W - en_txt.get_width() - 10, 28))
+    if is_boss_wave:
+        # Boss wave: just remind the player what to do
+        boss_txt = font_tiny.render("DEFEAT  THE  BOSS", True, RED)
+        surf.blit(boss_txt, (W - boss_txt.get_width() - 10, 28))
+    else:
+        # Normal wave: kills progress (turns green when threshold met) + enemies remaining
+        kills_color = NEON_GREEN if kills_this_wave >= required_kills else GREY
+        kills_txt = font_tiny.render(f"KILLS: {kills_this_wave}/{required_kills}", True, kills_color)
+        surf.blit(kills_txt, (W - kills_txt.get_width() - 10, 28))
+        en_label = f"LEFT: {enemies_left}/{wave_total}" if wave_total else f"LEFT: {enemies_left}"
+        en_txt = font_tiny.render(en_label, True, GREY)
+        surf.blit(en_txt, (W - en_txt.get_width() - 10, 44))
 
     # Power-up timers
     y = 36
@@ -556,6 +579,13 @@ def draw_hud(surf, player, wave, enemies_left, bomb_available):
     bomb_col = ORANGE if bomb_available else GREY
     bomb_txt = font_tiny.render("[ SPACE ] BOMB" if bomb_available else "NO BOMB", True, bomb_col)
     surf.blit(bomb_txt, (10, H - 22))
+
+    # Difficulty label (bottom-right)
+    if diff_label:
+        diff_colors = {"EASY": NEON_GREEN, "MEDIUM": YELLOW, "HARD": RED}
+        dc = diff_colors.get(diff_label, GREY)
+        dt = font_tiny.render(diff_label, True, dc)
+        surf.blit(dt, (W - dt.get_width() - 10, H - 22))
 
 
 def draw_stars(surf, stars):
@@ -617,7 +647,7 @@ def title_screen():
 
         screen.blit(ship_sprite, (W // 2 - 30, int(ship_y)))
 
-        if tick % 80 < 55:
+        if tick % 60 < 30:
             start = font_med.render("PRESS  ENTER  TO  START", True, YELLOW)
             screen.blit(start, (W // 2 - start.get_width() // 2, H - 120))
 
@@ -625,10 +655,184 @@ def title_screen():
             "WASD / ARROW KEYS : MOVE",
             "Z / CTRL : SHOOT",
             "SPACE : BOMB (collect first!)",
+            "ESC / P : PAUSE",
         ]
         for i, line in enumerate(controls):
             t = font_tiny.render(line, True, GREY)
             screen.blit(t, (W // 2 - t.get_width() // 2, H - 72 + i * 17))
+
+        pygame.display.flip()
+        clock.tick(FPS)
+        tick += 1
+
+
+def story_screen():
+    """Show mission briefing between title and first wave. Returns 'start' or 'back'."""
+    stars = draw_star_field(200)
+    lines = [
+        ("YEAR 2157  —  EARTH IS UNDER SIEGE.", RED),
+        ("", WHITE),
+        ("The Void Armada, an alien fleet of", WHITE),
+        ("unimaginable scale, tore through every", WHITE),
+        ("planetary defense in hours.", WHITE),
+        ("", WHITE),
+        ("Cities are burning. Governments have", WHITE),
+        ("fallen. Humanity's military is gone.", WHITE),
+        ("", WHITE),
+        ("You are the last pilot standing.", YELLOW),
+        ("One ship.  One chance.", YELLOW),
+        ("", WHITE),
+        ("Survive.  Defend Earth.  Destroy them.", CYAN),
+    ]
+    tick = 0
+
+    while True:
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if ev.type == pygame.KEYDOWN:
+                if ev.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    return "start"
+                if ev.key == pygame.K_ESCAPE:
+                    return "back"
+
+        screen.fill(DARK_BLUE)
+        scroll_stars(stars)
+        draw_stars(screen, stars)
+
+        hdr = font_med.render("MISSION  BRIEFING", True, CYAN)
+        shd = font_med.render("MISSION  BRIEFING", True, PURPLE)
+        tx = W // 2 - hdr.get_width() // 2
+        screen.blit(shd, (tx + 2, 42))
+        screen.blit(hdr, (tx, 40))
+        pygame.draw.line(screen, GREY, (80, 78), (W - 80, 78), 1)
+
+        for i, (text, col) in enumerate(lines):
+            t = font_small.render(text, True, col)
+            screen.blit(t, (W // 2 - t.get_width() // 2, 100 + i * 34))
+
+        if tick % 60 < 30:
+            go = font_med.render("PRESS  ENTER  TO  LAUNCH", True, NEON_GREEN)
+            screen.blit(go, (W // 2 - go.get_width() // 2, H - 70))
+
+        back_hint = font_tiny.render("ESC : Back to Menu", True, GREY)
+        screen.blit(back_hint, (W // 2 - back_hint.get_width() // 2, H - 28))
+
+        pygame.display.flip()
+        clock.tick(FPS)
+        tick += 1
+
+
+def difficulty_selection_screen():
+    """Let the player choose difficulty. Returns a difficulty dict, or None (ESC = back)."""
+    stars = draw_star_field(200)
+    tick = 0
+    selected_index = 1  # default to MEDIUM
+
+    DIFFICULTIES = [
+        {
+            "label": "EASY",
+            "target_waves": 5,
+            "speed_mult": 0.85,
+            "powerup_mult": 1.25,
+            "desc": ["5 Waves", "Slower enemies", "More power-ups"],
+            "color": NEON_GREEN,
+            "key": pygame.K_1,
+        },
+        {
+            "label": "MEDIUM",
+            "target_waves": 10,
+            "speed_mult": 1.0,
+            "powerup_mult": 1.0,
+            "desc": ["10 Waves", "Standard gameplay", ""],
+            "color": YELLOW,
+            "key": pygame.K_2,
+        },
+        {
+            "label": "HARD",
+            "target_waves": 15,
+            "speed_mult": 1.2,
+            "powerup_mult": 0.75,
+            "desc": ["15 Waves", "Faster enemies", "Fewer power-ups"],
+            "color": RED,
+            "key": pygame.K_3,
+        },
+    ]
+
+    while True:
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if ev.type == pygame.KEYDOWN:
+                if ev.key == pygame.K_ESCAPE:
+                    return None
+                if ev.key in (pygame.K_LEFT, pygame.K_a):
+                    selected_index = (selected_index - 1) % len(DIFFICULTIES)
+                elif ev.key in (pygame.K_RIGHT, pygame.K_d):
+                    selected_index = (selected_index + 1) % len(DIFFICULTIES)
+                elif ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                    return DIFFICULTIES[selected_index]
+                else:
+                    for i, d in enumerate(DIFFICULTIES):
+                        if ev.key == d["key"]:
+                            return d
+
+        screen.fill(DARK_BLUE)
+        scroll_stars(stars)
+        draw_stars(screen, stars)
+
+        hdr = font_med.render("SELECT  DIFFICULTY", True, CYAN)
+        shd = font_med.render("SELECT  DIFFICULTY", True, PURPLE)
+        tx = W // 2 - hdr.get_width() // 2
+        screen.blit(shd, (tx + 2, 62))
+        screen.blit(hdr, (tx, 60))
+        pygame.draw.line(screen, GREY, (80, 100), (W - 80, 100), 1)
+
+        card_w = 190
+        card_h = 160
+        gap = 20
+        total_w = card_w * 3 + gap * 2
+        start_x = W // 2 - total_w // 2
+
+        for i, d in enumerate(DIFFICULTIES):
+            cx = start_x + i * (card_w + gap)
+            cy = 140
+            is_selected = (i == selected_index)
+
+            card_rect = pygame.Rect(cx, cy, card_w, card_h)
+            pygame.draw.rect(screen, (15, 15, 40), card_rect, border_radius=8)
+            if is_selected:
+                # thick bright border for selected card
+                pygame.draw.rect(screen, d["color"], card_rect, 4, border_radius=8)
+                # outer glow ring
+                glow_rect = pygame.Rect(cx - 3, cy - 3, card_w + 6, card_h + 6)
+                pygame.draw.rect(screen, d["color"], glow_rect, 1, border_radius=10)
+            else:
+                pygame.draw.rect(screen, d["color"], card_rect, 2, border_radius=8)
+
+            key_hint = font_tiny.render(f"[ {i + 1} ]", True, d["color"])
+            screen.blit(key_hint, (cx + card_w // 2 - key_hint.get_width() // 2, cy + 10))
+
+            label_col = WHITE if is_selected else d["color"]
+            label_txt = font_med.render(d["label"], True, label_col)
+            screen.blit(label_txt, (cx + card_w // 2 - label_txt.get_width() // 2, cy + 30))
+
+            pygame.draw.line(screen, d["color"], (cx + 16, cy + 62), (cx + card_w - 16, cy + 62), 1)
+
+            for j, line in enumerate(d["desc"]):
+                if line:
+                    lt = font_tiny.render(line, True, WHITE)
+                    screen.blit(lt, (cx + card_w // 2 - lt.get_width() // 2, cy + 74 + j * 22))
+
+            if is_selected:
+                sel_txt = font_tiny.render("SELECTED", True, d["color"])
+                screen.blit(sel_txt, (cx + card_w // 2 - sel_txt.get_width() // 2, cy + card_h + 8))
+
+        hint_line = font_tiny.render(
+            "← / →  or  A / D : Choose      ENTER : Confirm      ESC : Back",
+            True, GREY
+        )
+        screen.blit(hint_line, (W // 2 - hint_line.get_width() // 2, H - 28))
 
         pygame.display.flip()
         clock.tick(FPS)
@@ -661,6 +865,50 @@ def game_over_screen(score, wave):
         if tick % 80 < 55:
             r = font_med.render("[ R ] RETRY     [ ESC ] QUIT", True, WHITE)
             screen.blit(r, (W // 2 - r.get_width() // 2, H - 100))
+
+        pygame.display.flip()
+        clock.tick(FPS)
+        tick += 1
+
+
+def mission_complete_screen(score):
+    """Victory screen shown after clearing Wave 5 (first boss). Returns 'retry' or 'menu'."""
+    stars = draw_star_field(200)
+    tick = 0
+    while True:
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT: pygame.quit(); sys.exit()
+            if ev.type == pygame.KEYDOWN:
+                if ev.key == pygame.K_r:                     return "retry"
+                if ev.key in (pygame.K_ESCAPE, pygame.K_q): return "menu"
+
+        screen.fill(DARK_BLUE)
+        scroll_stars(stars)
+        draw_stars(screen, stars)
+
+        hdr = font_big.render("MISSION  COMPLETE!", True, NEON_GREEN)
+        shd = font_big.render("MISSION  COMPLETE!", True, (0, 80, 40))
+        tx  = W // 2 - hdr.get_width() // 2
+        screen.blit(shd, (tx + 3, 143))
+        screen.blit(hdr, (tx, 140))
+        pygame.draw.line(screen, NEON_GREEN, (80, 198), (W - 80, 198), 1)
+
+        lines = [
+            ("The Void Armada flagship has been destroyed.", WHITE),
+            ("Earth is saved. Humanity lives on.", YELLOW),
+            ("", WHITE),
+            (f"FINAL  SCORE :  {score:07d}", CYAN),
+        ]
+        for i, (text, col) in enumerate(lines):
+            t = font_small.render(text, True, col)
+            screen.blit(t, (W // 2 - t.get_width() // 2, 226 + i * 36))
+
+        if tick % 60 < 30:
+            opts = font_med.render("[ R ] PLAY AGAIN     [ ESC ] MENU", True, YELLOW)
+            screen.blit(opts, (W // 2 - opts.get_width() // 2, H - 100))
+
+        hint = font_tiny.render("R : Retry   ESC / Q : Return to Menu", True, GREY)
+        screen.blit(hint, (W // 2 - hint.get_width() // 2, H - 28))
 
         pygame.display.flip()
         clock.tick(FPS)
@@ -702,8 +950,9 @@ def pause_screen(surf):
     
     # Menu options
     options = [
-        "[ R ] RESUME GAME",
-        "[ Q ] QUIT TO MENU"
+        ("[ R ]  RESUME GAME",    YELLOW),
+        ("[ N ]  NEW GAME",       NEON_GREEN),
+        ("[ Q ]  RETURN TO MENU", RED),
     ]
     
     # Keep the music state or pause all sounds
@@ -719,8 +968,12 @@ def pause_screen(surf):
                 if ev.key in (pygame.K_r, pygame.K_ESCAPE):
                     pygame.mixer.unpause()
                     return "resume"
+                if ev.key == pygame.K_n:
+                    pygame.mixer.unpause()
+                    return "restart"
                 if ev.key == pygame.K_q:
-                    return "quit"
+                    pygame.mixer.unpause()
+                    return "menu"
 
         # Draw background capture
         surf.blit(overlay, (0, 0))
@@ -730,17 +983,15 @@ def pause_screen(surf):
         surf.blit(shadow, (tx + 3, H // 2 - 80 + 3))
         surf.blit(title, (tx, H // 2 - 80))
         
-        # Draw options with blinking selection instructions
-        for i, opt in enumerate(options):
-            col = YELLOW if i == 0 else RED
-            # Blinking effect for Resume option to look active
+        # Draw options
+        for i, (label, col) in enumerate(options):
             if i == 0 and tick % 60 < 30:
                 col = WHITE
-            t = font_med.render(opt, True, col)
-            surf.blit(t, (W // 2 - t.get_width() // 2, H // 2 + 10 + i * 45))
-            
+            t = font_med.render(label, True, col)
+            surf.blit(t, (W // 2 - t.get_width() // 2, H // 2 + 10 + i * 50))
+
         # Draw subtext instructions
-        sub = font_tiny.render("Press ESC / R to Resume or Q to Quit", True, GREY)
+        sub = font_tiny.render("R / ESC : Resume   N : New Game   Q : Menu", True, GREY)
         surf.blit(sub, (W // 2 - sub.get_width() // 2, H - 50))
         
         pygame.display.flip()
@@ -750,7 +1001,14 @@ def pause_screen(surf):
 
 # ─── MAIN GAME LOOP ──────────────────────────────────────────────────────────
 
-def run_game():
+def run_game(difficulty=None):
+    if difficulty is None:
+        difficulty = {"label": "MEDIUM", "target_waves": 10, "speed_mult": 1.0, "powerup_mult": 1.0}
+    target_waves = difficulty["target_waves"]
+    speed_mult   = difficulty["speed_mult"]
+    powerup_mult = difficulty["powerup_mult"]
+    diff_label   = difficulty["label"]
+
     player = Player()
     bullets = []
     enemies = []
@@ -759,6 +1017,9 @@ def run_game():
     stars = draw_star_field(200)
 
     wave = 1
+    wave_total = 0
+    kills_this_wave = 0
+    required_kills = 0
     bomb_available = False
     wave_clear_timer = 0
     showing_wave = False
@@ -770,7 +1031,10 @@ def run_game():
         music.play(loops=-1)
 
     wave_banner(wave)
-    enemies = build_wave(wave)
+    enemies = build_wave(wave, speed_mult)
+    wave_total = len(enemies)
+    required_kills = get_required_kills(wave, wave_total)
+    kills_this_wave = 0
 
     def bomb_blast():
         nonlocal bomb_available
@@ -790,6 +1054,7 @@ def run_game():
             ))
 
     running = True
+    exit_reason = "quit"
     while running:
         dt = clock.tick(FPS)
 
@@ -800,8 +1065,12 @@ def run_game():
             if ev.type == pygame.KEYDOWN:
                 if ev.key in (pygame.K_ESCAPE, pygame.K_p):
                     action = pause_screen(screen)
-                    if action == "quit":
+                    if action == "menu":
                         running = False
+                        exit_reason = "menu"
+                    elif action == "restart":
+                        running = False
+                        exit_reason = "retry"
                 if ev.key in (pygame.K_SPACE,):
                     bomb_blast()
                 if ev.key in (pygame.K_z, pygame.K_LCTRL, pygame.K_RCTRL):
@@ -857,10 +1126,11 @@ def run_game():
                         player.score += e.score_val
                         score_flash.append([f"+{e.score_val}", int(e.x + e.w // 2), int(e.y), 50])
                         # Drop power-up
-                        if random.random() < 0.25 or e.etype in ("tank", "boss"):
+                        if random.random() < (0.25 * powerup_mult) or e.etype in ("tank", "boss"):
                             powerups.append(PowerUp(e.x + e.w // 2 - 11, e.y))
                         if e in enemies:
                             enemies.remove(e)
+                        kills_this_wave += 1
                         break
 
             # Enemy body vs player
@@ -905,13 +1175,30 @@ def run_game():
 
         # ── Wave progression ──
         if not enemies and not showing_wave:
-            wave_clear_timer += 1
-            if wave_clear_timer >= FPS * 2:
-                wave += 1
-                wave_clear_timer = 0
-                play("level_up")
-                wave_banner(wave)
-                enemies = build_wave(wave)
+            if kills_this_wave < required_kills:
+                # Enemies escaped without enough kills — spawn reinforcements
+                deficit = required_kills - kills_this_wave
+                for _ in range(deficit):
+                    x = random.randint(60, W - 60)
+                    reinf = Enemy("basic", x, -60, wave)
+                    reinf.entry_y = 100
+                    reinf.speed *= speed_mult
+                    enemies.append(reinf)
+            else:
+                wave_clear_timer += 1
+                if wave_clear_timer >= FPS * 2:
+                    if wave == target_waves:  # final boss cleared — mission complete
+                        if music: music.stop()
+                        result = mission_complete_screen(player.score)
+                        return result
+                    wave += 1
+                    wave_clear_timer = 0
+                    play("level_up")
+                    wave_banner(wave)
+                    enemies = build_wave(wave, speed_mult)
+                    wave_total = len(enemies)
+                    required_kills = get_required_kills(wave, wave_total)
+                    kills_this_wave = 0
         else:
             wave_clear_timer = 0
 
@@ -959,23 +1246,42 @@ def run_game():
             tmp.set_alpha(alpha)
             screen.blit(tmp, (sf[1] - t.get_width() // 2, int(sf[2])))
 
-        draw_hud(screen, player, wave, len(enemies), bomb_available)
+        draw_hud(screen, player, wave, len(enemies), bomb_available, wave_total, kills_this_wave, required_kills, diff_label)
+
+        # Wave cleared overlay (shown during the 2-second pause before next wave)
+        if not enemies and 0 < wave_clear_timer < FPS * 2:
+            msg   = "BOSS  ELIMINATED!" if wave % 5 == 0 else "WAVE  CLEARED!"
+            color = RED if wave % 5 == 0 else NEON_GREEN
+            shd_color = (80, 0, 0) if wave % 5 == 0 else (0, 80, 60)
+            wc  = font_big.render(msg, True, color)
+            shd = font_big.render(msg, True, shd_color)
+            wx  = W // 2 - wc.get_width() // 2
+            screen.blit(shd, (wx + 2, H // 2 - 24 + 2))
+            screen.blit(wc,  (wx,     H // 2 - 24))
+
         pygame.display.flip()
 
     if music:
         music.stop()
-    return "quit"
+    return exit_reason
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
 def main():
-    title_screen()
     while True:
-        result = run_game()
-        if result == "quit":
+        title_screen()
+        if story_screen() == "back":
+            continue
+        difficulty = difficulty_selection_screen()
+        if difficulty is None:  # ESC on difficulty → back to title
+            continue
+        result = "retry"
+        while result == "retry":
+            result = run_game(difficulty)
+        if result == "quit":  # game-over quit → exit
             break
-        # "retry" loops back
+        # result == "menu" → outer loop → title screen
 
     pygame.quit()
     sys.exit()
