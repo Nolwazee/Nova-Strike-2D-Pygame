@@ -396,6 +396,10 @@ class Enemy:
         self.dir = 1  # for boss side movement
         self.entry_y = -self.h  # start off-screen
         self.entered = False
+        # Boss phase system
+        self.boss_phase = 0      # 0, 1, 2
+        self.boss_shot_count = 0 # shots fired in current phase
+        self.boss_angle = 0      # for circular movement
 
     def rect(self):
         return pygame.Rect(int(self.x), int(self.y), self.w, self.h)
@@ -420,10 +424,22 @@ class Enemy:
         elif self.etype == "boss":
             self.move_timer += 1
             self.y = min(self.y + 0.5, 60)
-            # Hover side to side
-            self.x += self.speed * self.dir
-            if self.x < 0 or self.x > W - self.w:
-                self.dir *= -1
+            if self.boss_phase == 0:
+                # Phase 1: slow horizontal hover
+                self.x += self.speed * self.dir
+                if self.x < 0 or self.x > W - self.w:
+                    self.dir *= -1
+            elif self.boss_phase == 1:
+                # Phase 2: fast diagonal zigzag
+                self.x += self.speed * 2.5 * self.dir
+                if self.x < 0 or self.x > W - self.w:
+                    self.dir *= -1
+                    self.y = min(self.y + 8, 120)
+            elif self.boss_phase == 2:
+                # Phase 3: circular figure-8 hover
+                self.boss_angle += 0.03
+                self.x = W // 2 - self.w // 2 + math.sin(self.boss_angle) * 200
+                self.y = 60 + math.sin(self.boss_angle * 2) * 30
 
         # Shooting
         self.shoot_timer -= 1
@@ -432,12 +448,38 @@ class Enemy:
             cx = int(self.x + self.w // 2)
             cy = int(self.y + self.h)
             if self.etype == "boss":
-                # 3-way shot
-                for angle in [-20, 0, 20]:
-                    rad = math.radians(90 + angle)
-                    vx = math.cos(rad) * self.bullet_spd
-                    vy = math.sin(rad) * self.bullet_spd
-                    bullets.append(Bullet(cx, cy, vy, RED, "enemy", vx))
+                if self.boss_phase == 0:
+                    # Phase 1: 3-way spread
+                    for angle in [-20, 0, 20]:
+                        rad = math.radians(90 + angle)
+                        vx = math.cos(rad) * self.bullet_spd
+                        vy = math.sin(rad) * self.bullet_spd
+                        bullets.append(Bullet(cx, cy, vy, RED, "enemy", vx))
+                elif self.boss_phase == 1:
+                    # Phase 2: 5-way wide fan
+                    for angle in [-40, -20, 0, 20, 40]:
+                        rad = math.radians(90 + angle)
+                        vx = math.cos(rad) * self.bullet_spd
+                        vy = math.sin(rad) * self.bullet_spd
+                        bullets.append(Bullet(cx, cy, vy, ORANGE, "enemy", vx))
+                elif self.boss_phase == 2:
+                    # Phase 3: aimed shot at player + 2 flanking shots
+                    dx = player_x - cx
+                    dy = player_y - cy
+                    dist = max(1, math.hypot(dx, dy))
+                    vx_aim = (dx / dist) * self.bullet_spd
+                    vy_aim = (dy / dist) * self.bullet_spd
+                    bullets.append(Bullet(cx, cy, vy_aim, PURPLE, "enemy", vx_aim))
+                    # Flanking
+                    for angle_offset in [-30, 30]:
+                        rad = math.atan2(dy, dx) + math.radians(angle_offset)
+                        bullets.append(Bullet(cx, cy, math.sin(rad) * self.bullet_spd,
+                                              PINK, "enemy", math.cos(rad) * self.bullet_spd))
+                # Cycle phase after every 3 shots
+                self.boss_shot_count += 1
+                if self.boss_shot_count >= 3:
+                    self.boss_shot_count = 0
+                    self.boss_phase = (self.boss_phase + 1) % 3
             else:
                 bullets.append(Bullet(cx, cy, self.bullet_spd, ORANGE, "enemy"))
 
@@ -577,6 +619,266 @@ def scroll_stars(stars):
 
 
 # ─── SCREENS ─────────────────────────────────────────────────────────────────
+
+def story_crawl():
+    """Star Wars-style scrolling story intro for Wave 1."""
+    stars = draw_star_field(200)
+    crawl_lines = [
+        "",
+        "A long time ago, in a galaxy",
+        "under siege...",
+        "",
+        "",
+        "N O V A   S T R I K E",
+        "",
+        "",
+        "Humanity is on the brink",
+        "of extinction.",
+        "",
+        "An unstoppable alien race",
+        "known as the VOID ARMADA",
+        "has invaded Earth,",
+        "destroying cities, countries",
+        "and military defenses",
+        "worldwide.",
+        "",
+        "As Earth's final fighter pilot,",
+        "you are humanity's last hope.",
+        "",
+        "Wave after wave of enemy ships",
+        "descend from deep space.",
+        "",
+        "Your mission:",
+        "",
+        "      Survive.",
+        "      Defend Earth.",
+        "      Destroy the alien fleet.",
+        "      Defeat the invasion.",
+        "",
+        "",
+        "",
+    ]
+
+    line_h = 32
+    total_h = len(crawl_lines) * line_h
+    scroll_y = float(H)          # starts below screen
+    scroll_speed = 1.2
+    font_crawl_title = pygame.font.SysFont("consolas", 32, bold=True)
+    font_crawl = pygame.font.SysFont("consolas", 20)
+
+    # Perspective gradient mask
+    fade_surf = pygame.Surface((W, H), pygame.SRCALPHA)
+    for fy in range(H):
+        alpha = int(255 * (fy / H) ** 1.5)
+        fade_surf.fill((5, 5, 30, 255 - alpha), (0, fy, W, 1))
+
+    while True:
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT: pygame.quit(); sys.exit()
+            if ev.type == pygame.KEYDOWN:
+                if ev.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_ESCAPE):
+                    return
+
+        screen.fill((0, 0, 0))
+        scroll_stars(stars)
+        draw_stars(screen, stars)
+
+        # Draw crawl lines
+        for i, line in enumerate(crawl_lines):
+            y = int(scroll_y) + i * line_h
+            if y < -line_h or y > H:
+                continue
+            is_title = (line.strip() == "N O V A   S T R I K E")
+            font_use = font_crawl_title if is_title else font_crawl
+            col = CYAN if is_title else YELLOW
+            txt = font_use.render(line, True, col)
+            # Fade out top
+            fade = max(0, min(255, y * 3))
+            txt.set_alpha(fade)
+            screen.blit(txt, (W // 2 - txt.get_width() // 2, y))
+
+        # Overlay perspective fade
+        screen.blit(fade_surf, (0, 0))
+
+        # Skip hint
+        hint = font_tiny.render("PRESS SPACE / ENTER TO SKIP", True, GREY)
+        screen.blit(hint, (W // 2 - hint.get_width() // 2, H - 30))
+
+        pygame.display.flip()
+        clock.tick(FPS)
+        scroll_y -= scroll_speed
+
+        # Auto-end when all text has scrolled off
+        if scroll_y + total_h < 0:
+            return
+
+
+def tutorial_stage():
+    """Level 0 — Interactive tutorial teaching all controls."""
+    stars = draw_star_field(200)
+    player = Player()
+    bullets = []
+    particles = []
+
+    # Dummy target enemy (can't shoot, high HP)
+    dummy = Enemy("basic", W // 2 - 15, 180, wave=1)
+    dummy.entered = True
+    dummy.hp = 9999
+    dummy.shoot_rate = 99999  # never shoots
+    dummy.shoot_timer = 99999
+
+    # Tutorial steps: (description, completion_fn)
+    steps = [
+        ("Move your ship!  [ WASD / ARROW KEYS ]",   None),
+        ("Shoot the target!  [ Z / LEFT CTRL ]",     None),
+        ("Drop a BOMB!  [ SPACE ]",                  None),
+        ("Pause and Resume!  [ ESC / P ]",           None),
+    ]
+    step = 0
+    moved_dirs = set()   # track {left, right, up, down}
+    shots_fired = 0
+    bomb_used = False
+    pause_done = False
+
+    # Grant player a bomb for step 3
+    bomb_available = True
+
+    tick = 0
+    clock_tut = pygame.time.Clock()
+
+    while step < len(steps):
+        dt = clock_tut.tick(FPS)
+
+        # ── Events
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT: pygame.quit(); sys.exit()
+            if ev.type == pygame.KEYDOWN:
+                if ev.key in (pygame.K_z, pygame.K_LCTRL, pygame.K_RCTRL):
+                    player.shoot(bullets)
+                    shots_fired += 1
+                if ev.key == pygame.K_SPACE and step == 2 and bomb_available:
+                    bomb_available = False
+                    bomb_used = True
+                    # Bomb flash effect
+                    for _ in range(30):
+                        particles.append(Particle(
+                            random.randint(0, W), random.randint(0, H // 2),
+                            random.choice([ORANGE, YELLOW, RED]),
+                            (random.uniform(-5, 5), random.uniform(-3, 3)),
+                            random.randint(20, 45), random.randint(3, 7)
+                        ))
+                if ev.key in (pygame.K_ESCAPE, pygame.K_p) and step == 3:
+                    # Show the pause screen as part of the tutorial
+                    action = pause_screen(screen)
+                    if action == "resume":
+                        pause_done = True
+
+        keys = pygame.key.get_pressed()
+        old_x, old_y = player.x, player.y
+        player.move(keys)
+        player.update()
+        # Track directions moved
+        if player.x < old_x: moved_dirs.add("left")
+        if player.x > old_x: moved_dirs.add("right")
+        if player.y < old_y: moved_dirs.add("up")
+        if player.y > old_y: moved_dirs.add("down")
+        if keys[pygame.K_z] or keys[pygame.K_LCTRL] or keys[pygame.K_RCTRL]:
+            player.shoot(bullets)
+            shots_fired += 1
+
+        # Engine trail
+        if tick % 4 == 0:
+            cx = player.x + player.w // 2
+            cy = player.y + player.h - 4
+            particles.append(Particle(cx + random.randint(-3, 3), cy,
+                                      random.choice([ORANGE, YELLOW]),
+                                      (random.uniform(-0.3, 0.3), random.uniform(1, 2.5)),
+                                      life=random.randint(8, 18), size=random.randint(2, 4)))
+
+        # Update bullets
+        for b in bullets[:]:
+            b.update()
+            if b.y < -20 or b.y > H + 20:
+                bullets.remove(b)
+
+        # Update particles
+        for pt in particles[:]:
+            pt.update()
+            if pt.life <= 0:
+                particles.remove(pt)
+
+        # ── Step completion checks
+        if step == 0 and len(moved_dirs) >= 4:
+            step = 1
+        elif step == 1 and shots_fired >= 5:
+            step = 2
+        elif step == 2 and bomb_used:
+            step = 3
+        elif step == 3 and pause_done:
+            step = 4  # done
+            break
+
+        # ── Draw
+        screen.fill(DARK_BLUE)
+        scroll_stars(stars)
+        draw_stars(screen, stars)
+        for pt in particles: pt.draw(screen)
+        for b in bullets: b.draw(screen)
+
+        # Draw dummy target
+        dummy.draw(screen)
+        # Draw a subtle label above dummy
+        lbl = font_tiny.render("[ TRAINING TARGET ]", True, GREY)
+        screen.blit(lbl, (dummy.x + dummy.w // 2 - lbl.get_width() // 2, dummy.y - 20))
+
+        player.draw(screen)
+
+        # ── Tutorial panel
+        panel_y = H - 130
+        panel = pygame.Surface((W, 130), pygame.SRCALPHA)
+        panel.fill((10, 10, 40, 200))
+        screen.blit(panel, (0, panel_y))
+
+        header = font_small.render("▶  TRAINING  MODE", True, CYAN)
+        screen.blit(header, (W // 2 - header.get_width() // 2, panel_y + 6))
+
+        # Steps list
+        for i, (desc, _) in enumerate(steps):
+            if i < step:
+                col = GREEN
+                prefix = "✓  "
+            elif i == step:
+                col = YELLOW if tick % 60 < 40 else WHITE
+                prefix = "▶  "
+            else:
+                col = GREY
+                prefix = "   "
+            t = font_tiny.render(prefix + desc, True, col)
+            screen.blit(t, (20, panel_y + 30 + i * 22))
+
+        # Bomb indicator
+        bomb_col = ORANGE if bomb_available else GREY
+        bt = font_tiny.render("BOMB READY" if bomb_available else "BOMB USED", True, bomb_col)
+        screen.blit(bt, (W - bt.get_width() - 14, panel_y + 30))
+
+        pygame.display.flip()
+        tick += 1
+
+    # Flash "TRAINING COMPLETE!"
+    for frame in range(100):
+        screen.fill(DARK_BLUE)
+        draw_stars(screen, stars)
+        alpha = 255 if frame < 60 else max(0, 255 - (frame - 60) * 8)
+        msg = font_big.render("TRAINING  COMPLETE!", True, NEON_GREEN)
+        tmp = pygame.Surface(msg.get_size(), pygame.SRCALPHA)
+        tmp.blit(msg, (0, 0))
+        tmp.set_alpha(alpha)
+        screen.blit(tmp, (W // 2 - msg.get_width() // 2, H // 2 - 30))
+        pygame.display.flip()
+        clock_tut.tick(FPS)
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT: pygame.quit(); sys.exit()
+
 
 def title_screen():
     stars = draw_star_field(200)
@@ -832,7 +1134,11 @@ def run_game():
         for e in enemies[:]:
             e.update(bullets, player.x + player.w // 2, player.y + player.h // 2)
             if e.y > H + 50:
-                enemies.remove(e)
+                # Wrap back to top — must be killed to clear the wave
+                e.y = -e.h - random.randint(10, 80)
+                e.x = random.randint(0, W - e.w)
+                e.entered = False
+                e.entry_y = random.randint(40, 150)
                 continue
 
             # Enemy bullets vs player
@@ -971,11 +1277,15 @@ def run_game():
 
 def main():
     title_screen()
+    # First run: show tutorial then story crawl
+    tutorial_stage()
+    story_crawl()
+    first_run = True
     while True:
         result = run_game()
         if result == "quit":
             break
-        # "retry" loops back
+        # On retry, skip tutorial and story crawl — go straight back into the game
 
     pygame.quit()
     sys.exit()
