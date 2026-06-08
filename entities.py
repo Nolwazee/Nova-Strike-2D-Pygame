@@ -181,6 +181,9 @@ class Player:
                 if self.rapid_timer > 0:
                     bullets.append(Bullet(cx - 10, self.y + 6, -13, self.bullet_color, owner_id))
                     bullets.append(Bullet(cx + 6,  self.y + 6, -13, self.bullet_color, owner_id))
+                    # Add more rapid fire shots (5-way spread)
+                    bullets.append(Bullet(cx - 18, self.y + 12, -12, self.bullet_color, owner_id, vx=-2))
+                    bullets.append(Bullet(cx + 14, self.y + 12, -12, self.bullet_color, owner_id, vx=2))
                 self.shoot_cooldown = cd
                 return True
         return False
@@ -247,11 +250,23 @@ class Enemy:
         "boss":  {"hp": 300,"speed": 1.5, "score": 1000,"shoot_rate": 40,  "bullet_spd": 6, "dmg": 25, "size": 64},
     }
 
-    def __init__(self, etype, x, y, wave=1):
+    def __init__(self, etype, x, y, wave=1, diff_label="MEDIUM"):
         self.etype = etype
         stats = self.TYPES[etype].copy()
-        scale = 1 + (wave - 1) * 0.15
-        self.hp = int(stats["hp"] * scale)
+        
+        diff_factors = {"EASY": 0.6, "MEDIUM": 1.0, "HARD": 1.5}
+        df = diff_factors.get(diff_label, 1.0)
+        
+        if etype == "boss":
+            base_hp = 150
+            wave_scale = (wave / 5.0) ** 1.8
+            self.hp = int(base_hp * wave_scale * df)
+            # Override stats with scaling values
+            stats["speed"] = stats["speed"] * ((wave / 5.0) ** 0.5) * (df ** 0.5)
+            stats["shoot_rate"] = max(15, int(stats["shoot_rate"] / (((wave / 5.0) ** 0.5) * (df ** 0.5))))
+        else:
+            scale = 1 + (wave - 1) * 0.15
+            self.hp = int(stats["hp"] * scale * df)
         self.max_hp = self.hp
         self.speed = stats["speed"]
         self.score_val = stats["score"]
@@ -366,7 +381,7 @@ class PowerUp:
     TYPES = ["health", "rapid", "shield", "bomb"]
 
     def __init__(self, x, y, ptype=None):
-        self.ptype = ptype or random.choice(self.TYPES)
+        self.ptype = ptype or random.choice(["health", "rapid", "rapid", "shield", "bomb"])
         self.x, self.y = x, y
         self.w = self.h = 22
         self.speed = 1.8

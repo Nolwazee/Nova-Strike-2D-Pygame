@@ -64,7 +64,7 @@ def draw_stars(surf, stars):
 # ─── HUD ─────────────────────────────────────────────────────────────────────
 
 def draw_hud(surf, player, wave, enemies_left, bomb_available,
-             wave_total=0, kills_this_wave=0, required_kills=0, diff_label=""):
+             wave_total=0, kills_this_wave=0, required_kills=0, diff_label="", sound_on=True):
     bar_w = 200
     ratio = player.hp / player.max_hp
     bar_color = GREEN if ratio > 0.5 else (YELLOW if ratio > 0.25 else RED)
@@ -95,11 +95,17 @@ def draw_hud(surf, player, wave, enemies_left, bomb_available,
 
     y = 36
     if player.rapid_timer > 0:
-        t = _font_tiny.render(f"RAPID x2  {player.rapid_timer // FPS + 1}s", True, YELLOW)
-        surf.blit(t, (10, y)); y += 16
+        if player.rapid_timer > 180 or (player.rapid_timer % 30 < 15):
+            col = RED if player.rapid_timer <= 180 else YELLOW
+            t = _font_tiny.render(f"RAPID x5  {player.rapid_timer // FPS + 1}s", True, col)
+            surf.blit(t, (10, y))
+        y += 16
     if player.shield_timer > 0:
-        t = _font_tiny.render(f"SHIELD  {player.shield_timer // FPS + 1}s", True, CYAN)
-        surf.blit(t, (10, y)); y += 16
+        if player.shield_timer > 180 or (player.shield_timer % 30 < 15):
+            col = RED if player.shield_timer <= 180 else CYAN
+            t = _font_tiny.render(f"SHIELD  {player.shield_timer // FPS + 1}s", True, col)
+            surf.blit(t, (10, y))
+        y += 16
 
     bomb_col = ORANGE if bomb_available else GREY
     bomb_txt = _font_tiny.render("[ SPACE ] BOMB" if bomb_available else "NO BOMB", True, bomb_col)
@@ -110,6 +116,10 @@ def draw_hud(surf, player, wave, enemies_left, bomb_available,
         dc = diff_colors.get(diff_label, GREY)
         dt = _font_tiny.render(diff_label, True, dc)
         surf.blit(dt, (W - dt.get_width() - 10, H - 22))
+
+    # Sound/Mute indicator
+    sound_txt = _font_tiny.render("[ M ] SOUND: ON" if sound_on else "[ M ] SOUND: OFF", True, NEON_GREEN if sound_on else GREY)
+    surf.blit(sound_txt, (W // 2 - sound_txt.get_width() // 2, H - 22))
 
 
 # ─── SCREENS ─────────────────────────────────────────────────────────────────
@@ -291,7 +301,7 @@ def multiplayer_menu():
         tick += 1
 
 
-def title_screen(get_profile_fn, has_save=False, save_data=None, profile_screen_callback=None):
+def title_screen(get_profile_fn, has_save=False, save_data=None, profile_screen_callback=None, sound_on=True):
     """Main menu. Returns one of: 'new', 'continue', 'multiplayer', 'quit'."""
     stars = draw_star_field(200)
     ship_y = H + 50
@@ -307,6 +317,11 @@ def title_screen(get_profile_fn, has_save=False, save_data=None, profile_screen_
         menu_items.append(    ("NEW GAME",     YELLOW,      "new"))
         menu_items.append(    ("PROFILE",      PURPLE,      "profile"))
         menu_items.append(    ("MULTIPLAYER",  CYAN,        "multiplayer"))
+        
+        sound_label = "SOUND: ON" if sound_on else "SOUND: OFF"
+        sound_col = NEON_GREEN if sound_on else GREY
+        menu_items.append(    (sound_label,    sound_col,   "mute"))
+        
         menu_items.append(    ("QUIT",         RED,         "quit"))
 
         if selected >= len(menu_items):
@@ -332,8 +347,10 @@ def title_screen(get_profile_fn, has_save=False, save_data=None, profile_screen_
                     return "continue"
                 elif ev.key == pygame.K_n:
                     return "new"
-                elif ev.key == pygame.K_m:
+                elif ev.key == pygame.K_l:
                     return "multiplayer"
+                elif ev.key == pygame.K_m:
+                    return "mute"
                 elif ev.key == pygame.K_p and profile_screen_callback:
                     profile_screen_callback()
                 elif ev.key in (pygame.K_ESCAPE, pygame.K_q):
