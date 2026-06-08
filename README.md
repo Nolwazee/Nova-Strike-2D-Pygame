@@ -1,112 +1,292 @@
-# NOVA STRIKE 🚀
-### A 2D Top-Down Space Shooter built with Pygame
+# 🚀 NOVA STRIKE
+
+### A 2D Top-Down Space Shooter Built with Pygame
+
+![Python](https://img.shields.io/badge/Python-3.8+-blue)
+![Pygame](https://img.shields.io/badge/Pygame-2.x-green)
+![Status](https://img.shields.io/badge/Project-Completed-success)
+![Genre](https://img.shields.io/badge/Genre-Arcade%20Shooter-red)
 
 ---
 
-## STORYLINE
-Earth's final fighter pilot stands against an unstoppable alien invasion fleet.
-Wave after wave of enemy ships descend. You must survive — or humanity falls.
+# 🌌 Storyline
+
+Humanity is on the brink of extinction.
+
+An unstoppable alien armada has invaded Earth, destroying cities and military defenses worldwide. As Earth's final fighter pilot, you are humanity's last hope.
+
+Wave after wave of enemy ships descend from deep space.
+
+Your mission:
+
+**Survive. Defend Earth. Defeat the invasion.**
 
 ---
 
-## SETUP & RUNNING
+# 🎮 Gameplay Preview
 
-### Requirements
-- Python 3.8+
-- Pygame 2.x
-- NumPy (for procedural audio — optional but recommended)
+## Main Gameplay
 
-### Install dependencies
+Replace these placeholders with screenshots or GIFs.
+
+| Main Battle                                 | Boss Fight                               |
+| ------------------------------------------- | ---------------------------------------- |
+| ![Gameplay Screenshot](images/gameplay.png) | ![Boss Screenshot](images/bossfight.png) |
+
+---
+
+## Power-Ups
+
+| Health | Rapid Fire   | Shield        | Bomb                |
+| ------ | ------------ | ------------- | ------------------- |
+| 💚     | 💛           | 💠            | 🔥                  |
+| +35 HP | Double Shots | Block One Hit | Destroy All Enemies |
+
+---
+
+# 🎯 Core Features
+
+## Enemy AI System
+
+### 🔴 Basic Enemy
+
+* Steady downward movement
+* Single projectile attacks
+* Entry-level threat
+
+### 🟣 Fast Enemy
+
+* Sine-wave movement pattern
+* Faster firing rate
+* Harder to hit
+
+### 🟠 Tank Enemy
+
+* High health pool
+* Slow movement
+* Visible health bar
+
+### 👾 Boss Enemy
+
+* Appears every 5th wave
+* Hovering movement
+* Fires 3-way spread attacks
+* Massive health pool
+
+---
+
+# 📊 Wave Progression
+
+| Wave | Enemies                                    |
+| ---- | ------------------------------------------ |
+| 1    | 6 Basic                                    |
+| 2    | 8 Basic + 2 Fast                           |
+| 3    | 10 Basic + 3 Fast + 2 Tank                 |
+| 4    | 12 Basic + 4 Fast + 3 Tank                 |
+| 5    | 👾 BOSS WAVE                               |
+| 6+   | Increased difficulty + Boss every 5th wave |
+
+### Difficulty Growth
+
+```text
+Wave 1  ███
+Wave 2  █████
+Wave 3  ███████
+Wave 4  █████████
+Wave 5  ███████████████
+Wave 6+ ████████████████████
+```
+
+---
+
+# ⚡ Game Mechanics
+
+## Combat System
+
+* Smooth player movement
+* Bullet collision detection
+* Enemy projectile system
+* Bomb attack mechanic
+
+## Power-Up System
+
+Enemies randomly drop collectible upgrades:
+
+| Power-Up      | Effect                              |
+| ------------- | ----------------------------------- |
+| 💚 Health     | Restores 35 HP                      |
+| 💛 Rapid Fire | Double-barrel weapon for 10 seconds |
+| 💠 Shield     | Absorbs one incoming hit            |
+| 🔥 Bomb       | Clears all enemies on screen        |
+
+---
+
+# 🎨 Visual Effects
+
+### Procedurally Drawn Sprites
+
+* Player ship
+* Enemy ships
+* Bullets
+* Power-ups
+
+### Particle System
+
+* Explosions
+* Bullet impacts
+* Engine trails
+* Score popups
+
+### Background Effects
+
+* Parallax star field
+* Shield ring animation
+* Floating score indicators
+
+---
+
+# 🔊 Audio System
+
+Procedurally generated using NumPy.
+
+### Sound Effects
+
+* Laser shooting
+* Explosions
+* Damage hits
+* Power-up collection
+* Shield activation
+* Wave completion
+* Game over
+
+### Music
+
+* Runtime-generated looping soundtrack
+
+---
+
+# 🖥️ Controls
+
+| Key        | Action            |
+| ---------- | ----------------- |
+| W A S D    | Move Ship         |
+| Arrow Keys | Move Ship         |
+| Z          | Shoot             |
+| Left CTRL  | Shoot             |
+| SPACE      | Use Bomb          |
+| ESC        | Quit/Menu         |
+| R          | Retry (Game Over) |
+
+---
+
+# 🏗️ Project Structure
+
+```text
+NOVA-STRIKE/
+│
+├── game.py
+├── assets/
+│   ├── sounds/
+│   └── images/
+│
+├── screenshots/
+│   ├── gameplay.png
+│   ├── bossfight.png
+│   └── powerups.png
+│
+├── README.md
+│
+└── requirements.txt
+```
+
+---
+
+# ⚙️ Installation
+
+## Requirements
+
+* Python 3.8+
+* Pygame 2.x
+* NumPy
+
+## Install Dependencies
+
 ```bash
 pip install pygame numpy
 ```
 
-### Run the game
+## Run Game
+
 ```bash
 python game.py
 ```
 
 ---
 
-## CONTROLS
+# 📈 Gameplay Systems Overview
 
-| Key               | Action         |
-|-------------------|----------------|
-| WASD / Arrow Keys | Move ship      |
-| Z / Left Ctrl     | Shoot          |
-| SPACE             | Drop BOMB      |
-| ESC               | Quit / Menu    |
-| R (Game Over)     | Retry          |
-
----
-
-## GAME FEATURES
-
-### Genre
-Arcade Space Shooter (2D, top-down)
-
-### Gameplay Mechanics (✅ meets requirements)
-
-1. **Enemy AI** — Four enemy types with unique behaviours:
-   - 🔴 Basic — Steady descent, single shots
-   - 🟣 Fast — Sine-wave movement, rapid shots
-   - 🟠 Tank — Slow but heavily armoured, HP bar visible
-   - 👾 Boss — Appears every 5th wave; hovers, fires 3-way spread
-
-2. **Power-up System** — Four collectable power-ups drop from enemies:
-   - 💚 Health — Restores 35 HP
-   - 💛 Rapid Fire — Double-barrel shots for 10 seconds
-   - 💠 Shield — Absorbs one hit completely
-   - 🔥 Bomb — Clears the entire screen of enemies
-
-3. **Scoring System** — Points per kill, on-screen score flashes, persistent score tracking
-
-4. **Wave Progression** — Enemies scale with each wave; boss battles every 5th wave
-
-### Visual Elements
-- Procedurally drawn sprites (ship, enemies, bullets, power-ups)
-- Scrolling parallax star field
-- Particle system for explosions, engine trails, bullet impacts
-- Animated HUD with HP bar, timers, score
-- Shield ring animation
-- Score popup floaters on kill
-
-### Audio Elements (requires NumPy)
-- Procedurally generated sound effects: shoot, explode, hit, power-up, shield, level-up, game over
-- Looping background music synthesised at runtime
+```text
+PLAYER
+   │
+   ├── Shoot
+   │
+   ▼
+ENEMIES
+   │
+   ├── Drop Power-Ups
+   │
+   ▼
+UPGRADES
+   │
+   ├── Improve Survival
+   │
+   ▼
+HIGHER WAVES
+   │
+   ▼
+BOSS BATTLES
+```
 
 ---
 
-## WAVE STRUCTURE
+# ✅ PBDE401 Requirements Compliance
 
-| Wave      | Enemies                              |
-|-----------|--------------------------------------|
-| 1         | 6 Basic                              |
-| 2         | 8 Basic, 2 Fast                      |
-| 3         | 10 Basic, 3 Fast, 2 Tank             |
-| 4         | 12 Basic, 4 Fast, 3 Tank             |
-| 5         | ⚠ BOSS WAVE                         |
-| 6+        | Scales further + boss every 5 waves  |
-
----
-
-## PROJECT COMPLIANCE CHECKLIST
-
-- ✅ Built with Pygame (approved engine)
-- ✅ Clear genre (Arcade Space Shooter)
-- ✅ Storyline (Earth's last defender)
-- ✅ 2D application
-- ✅ At least one playable level (endless wave-based stage)
-- ✅ Clear objective (survive, defeat enemies, score points)
-- ✅ Sprites (procedurally drawn)
-- ✅ Animations (engine trail, explosions, power-up bobbing, shield ring)
-- ✅ Sound effects (shoot, explode, hit, power-up, etc.)
-- ✅ Background music (procedurally synthesised)
-- ✅ Mechanic 1: Enemy AI (4 types with unique patterns)
-- ✅ Mechanic 2: Power-up system (4 types)
-- ✅ Bonus: Scoring system
-- ✅ Bonus: Boss battles
+| Requirement       | Status |
+| ----------------- | ------ |
+| Pygame Engine     | ✅      |
+| 2D Application    | ✅      |
+| Storyline         | ✅      |
+| Playable Level    | ✅      |
+| Objective         | ✅      |
+| Sprites           | ✅      |
+| Animations        | ✅      |
+| Sound Effects     | ✅      |
+| Background Music  | ✅      |
+| Enemy AI Mechanic | ✅      |
+| Power-Up Mechanic | ✅      |
+| Scoring System    | ✅      |
+| Boss Battles      | ✅      |
 
 ---
 
-*NOVA STRIKE — Built for PBDE401 game development requirement*
+# 🏆 Learning Outcomes Demonstrated
+
+* Object-Oriented Programming
+* Event Handling
+* Collision Detection
+* Enemy AI Behaviour
+* Particle Systems
+* Procedural Audio Generation
+* Game State Management
+* HUD Design
+* Wave-Based Difficulty Scaling
+
+---
+
+# 👨‍💻 Developer
+
+**Group 20**
+
+PBDE401 Game Development Project
+
+NOVA STRIKE © 2026
